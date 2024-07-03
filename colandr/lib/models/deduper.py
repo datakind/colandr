@@ -7,6 +7,7 @@ import urllib.parse
 from collections.abc import Iterable
 
 import dedupe
+from dedupe import variables
 from textacy import preprocessing
 
 from .. import utils
@@ -18,59 +19,24 @@ RE_DOI_HTTP = re.compile(r"^https?(://)?", flags=re.IGNORECASE)
 
 SETTINGS_FNAME = "deduper_settings"
 TRAINING_FNAME = "deduper_training.json"
-VARIABLES: list[dict[str, t.Any]] = [
-    {"field": "type_of_reference", "type": "Exact"},
-    {"field": "doi", "type": "String", "has missing": True},
-    {"field": "title", "type": "String", "variable name": "title"},
-    {
-        "field": "authors_joined",
-        "type": "String",
-        "has missing": True,
-        "variable name": "authors_joined",
-    },
-    {
-        "field": "authors_initials",
-        "type": "Set",
-        "has missing": True,
-        "variable name": "authors_initials",
-    },
-    {
-        "field": "pub_year",
-        "type": "Exact",
-        "has missing": True,
-        "variable name": "pub_year",
-    },
-    {
-        "field": "journal_name",
-        "type": "String",
-        "has missing": True,
-        "variable name": "journal_name",
-    },
-    {
-        "field": "journal_volume",
-        "type": "Exact",
-        "has missing": True,
-        "variable name": "journal_volume",
-    },
-    {
-        "field": "journal_issue_number",
-        "type": "Exact",
-        "has missing": True,
-        "variable name": "journal_issue_number",
-    },
-    {"field": "issn", "type": "String", "has missing": True, "variable name": "issn"},
-    {"field": "abstract", "type": "Text", "has missing": True},
-    {"type": "Interaction", "interaction variables": ["journal_name", "pub_year"]},
-    {
-        "type": "Interaction",
-        "interaction variables": [
-            "journal_name",
-            "journal_volume",
-            "journal_issue_number",
-        ],
-    },
-    {"type": "Interaction", "interaction variables": ["issn", "pub_year"]},
-    {"type": "Interaction", "interaction variables": ["title", "authors_joined"]},
+VARIABLES: list[variables.base.Variable] = [
+    variables.Exact("type_of_reference"),
+    variables.String("doi", has_missing=True),
+    variables.String("title", name="title"),
+    variables.String("authors_joined", has_missing=True, name="authors_joined"),
+    variables.Set("authors_initials", has_missing=True, name="authors_initials"),
+    variables.Exact("pub_year", has_missing=True, name="pub_year"),
+    variables.String("journal_name", has_missing=True, name="journal_name"),
+    variables.Exact("journal_volume", has_missing=True, name="journal_volume"),
+    variables.Exact(
+        "journal_issue_number", has_missing=True, name="journal_issue_number"
+    ),
+    variables.String("issn", has_missing=True, name="issn"),
+    variables.Text("abstract", has_missing=True),
+    variables.Interaction("journal_name", "pub_year"),
+    variables.Interaction("journal_name", "journal_volume", "journal_issue_number"),
+    variables.Interaction("issn", "pub_year"),
+    variables.Interaction("title", "authors_joined"),
 ]
 
 
@@ -115,7 +81,7 @@ class Deduper:
         data: Iterable[dict[str, t.Any]],
         id_key: str,
     ) -> dict[t.Any, dict[str, t.Any]]:
-        fields = [pv.field for pv in self.model.data_model.primary_variables]
+        fields = [pv.field for pv in self.model.data_model.field_variables]
         LOGGER.info("preprocessing data with fields %s ...", fields)
         return {record.pop(id_key): self._preprocess_record(record) for record in data}
 
