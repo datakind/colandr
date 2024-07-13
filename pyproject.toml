@@ -57,7 +57,7 @@ dev = [
   "pytest~=8.0",
   "pytest-postgresql~=6.0",
   "SQLAlchemy-Utils~=0.41.0",
-  "ruff~=0.4.0",
+  "ruff~=0.5.0",
 ]
 
 [tool.setuptools.packages.find]
@@ -77,9 +77,6 @@ addopts = "--verbose"
 testpaths = ["tests"]
 
 [tool.ruff]
-# ignore line-length violations, None comparisons, unused imports
-ignore = ["E501", "E711", "F401"]
-ignore-init-module-imports = true
 line-length = 88
 indent-width = 4
 target-version = "py310"
@@ -90,6 +87,10 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[tool.ruff.lint]
+# ignore line-length violations, None comparisons, unused imports
+ignore = ["E501", "E711", "F401"]
 
 [tool.ruff.lint.isort]
 lines-after-imports = 2
