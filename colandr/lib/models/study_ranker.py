@@ -1,3 +1,4 @@
+import collections
 import functools
 import logging
 import pathlib
@@ -15,28 +16,41 @@ import river.metrics
 import river.naive_bayes
 import river.optim
 import river.preprocessing
+import scipy.sparse
 
 
 LOGGER = logging.getLogger(__name__)
 
 
-_MODEL = river.compose.Pipeline(
-    (
-        "featurizer",
-        river.feature_extraction.TFIDF(
-            normalize=True, strip_accents=False, ngram_range=(1, 1)
-        ),
-    ),
-    (
-        "classifier",
-        river.linear_model.LogisticRegression(
-            optimizer=river.optim.SGD(lr=0.5),
-            loss=river.optim.losses.BinaryFocalLoss(),
-            initializer=river.optim.initializers.Zeros(),
-            l2=0.001,
-        ),
-    ),
-)
+class ColandrTFIDF(river.feature_extraction.TFIDF):
+    def learn_many(self, X: pd.Series) -> None:
+        # increment global document counter
+        self.n += X.shape[0]
+        # update document counts
+        doc_counts = (
+            X.map(lambda x: set(self.process_text(x)))
+            .explode()
+            .value_counts()
+            .to_dict()
+        )
+        self.dfs.update(doc_counts)
+
+    def transform_many(self, X: pd.Series) -> pd.DataFrame:
+        """Transform pandas series of string into tf-idf pandas sparse dataframe."""
+        indptr, indices, data = [0], [], []
+        index: dict[int, int] = {}
+        for doc in X:
+            term_weights: dict[int, float] = self.transform_one(doc)
+            for term, weight in term_weights.items():
+                indices.append(index.setdefault(term, len(index)))
+                data.append(weight)
+            indptr.append(len(data))
+
+        return pd.DataFrame.sparse.from_spmatrix(
+            scipy.sparse.csr_matrix((data, indices, indptr)),
+            index=X.index,
+            columns=index.keys(),
+        )
 
 
 class StudyRanker:
@@ -91,13 +105,13 @@ class StudyRanker:
 
     def learn_many(self, records: Iterable[dict[str, str]]) -> None:
         # HACK: this shit is broken in river v0.21!
-        # so we'll just iterate over the records one by one
-        # df = pd.DataFrame(data=records)
-        # X = df[self.feature_col].astype("string")
-        # y = df[self.target_col]
-        # self.model.learn_many(X, y)
-        for record in records:
-            self.learn_one(record)
+        # but if we use custom ColandrTFIDF ...
+        df = pd.DataFrame(data=records)
+        X = df[self.feature_col].astype("string")
+        y = df[self.target_col]
+        self.model.learn_many(X, y)
+        # for record in records:
+        #     self.learn_one(record)
 
     def predict_one(
         self, record: dict[str, str], *, proba: bool = False
@@ -129,3 +143,23 @@ def _load_study_ranker_model(
         LOGGER.info("<Review(id=%s)>: new study ranker model loaded ...", review_id)
         _model = _MODEL.clone()
     return _model
+
+
+_MODEL = river.compose.Pipeline(
+    (
+        "featurizer",
+        # river.feature_extraction.TFIDF(
+        #     normalize=True, strip_accents=False, ngram_range=(1, 1)
+        # ),
+        ColandrTFIDF(normalize=True, strip_accents=False, ngram_range=(1, 1)),
+    ),
+    (
+        "classifier",
+        river.linear_model.LogisticRegression(
+            optimizer=river.optim.SGD(lr=0.5),
+            loss=river.optim.losses.BinaryFocalLoss(),
+            initializer=river.optim.initializers.Zeros(),
+            l2=0.001,
+        ),
+    ),
+)
