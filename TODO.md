@@ -10,3 +10,4 @@
 - [x] Allow for requiring multiple screeners on a configurable percentage of studies (for "rapid review" style projects)
 - [x] Add filtering studies by number of citation/fulltext reviewers
 - [ ] Investigate migrating from flask-restx to apiflask
+- [ ] Consider removing async tasks (and db columns?) for text content vectors
