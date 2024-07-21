@@ -904,7 +904,7 @@ def update_study_status(mapper, connection, target):
         data_extraction = connection.execute(
             sa.select(DataExtraction).where(DataExtraction.study_id == study_id)
         ).first()
-        # data_extraction_inserted_or_deleted = False
+        data_extraction_inserted_or_deleted = False
         if status == "included" and data_extraction is None:
             connection.execute(
                 sa.insert(DataExtraction).values(study_id=study_id, review_id=review_id)
