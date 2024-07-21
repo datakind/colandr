@@ -1,6 +1,7 @@
 import functools
 import logging
 import pathlib
+import typing as t
 from collections.abc import Iterable
 
 import joblib
@@ -102,45 +103,45 @@ class StudyRanker:
         model_fpath = self.model_fpath
         model_fpath.parent.mkdir(parents=True, exist_ok=True)
         with model_fpath.open(mode="wb") as f:
-            joblib.dump(self.model, f)
+            joblib.dump(self.model(), f)
         LOGGER.info(
             "<Review(id=%s)>: study ranker model saved to %s",
             self.review_id,
             model_fpath,
         )
 
-    def learn_one(self, record: dict[str, str]) -> None:
+    def learn_one(self, record: dict[str, t.Any]) -> None:
         x = record[self.feature_col]
         y = record[self.target_col]
-        self.model.learn_one(x, y)
+        self.model().learn_one(x, y)
 
-    def learn_many(self, records: Iterable[dict[str, str]]) -> None:
+    def learn_many(self, records: Iterable[dict[str, t.Any]]) -> None:
         # HACK: this shit is broken in river v0.21!
         # but if we use custom ColandrTFIDF ...
         df = pd.DataFrame(data=records)
         X = df[self.feature_col].astype("string")
         y = df[self.target_col]
-        self.model.learn_many(X, y)
+        self.model().learn_many(X, y)
         # for record in records:
         #     self.learn_one(record)
 
     def predict_one(
-        self, record: dict[str, str], *, proba: bool = False
+        self, record: dict[str, t.Any], *, proba: bool = False
     ) -> bool | dict[bool, float]:
         x = record[self.feature_col]
         if not proba:
-            return self.model.predict_one(x)
+            return self.model().predict_one(x)
         else:
-            return self.model.predict_proba_one(x)
+            return self.model().predict_proba_one(x)
 
     def predict_many(
-        self, records: Iterable[dict[str, str]], *, proba: bool = False
+        self, records: Iterable[dict[str, t.Any]], *, proba: bool = False
     ) -> pd.Series:
         X = pd.DataFrame(data=records)[self.feature_col].astype("string")
         if not proba:
-            return self.model.predict_many(X)
+            return self.model().predict_many(X)
         else:
-            return self.model.predict_proba_many(X)
+            return self.model().predict_proba_many(X)
 
 
 _MODEL = river.compose.Pipeline(
