@@ -895,11 +895,10 @@ def update_study_status(mapper, connection, target):
         if n_included >= 25 and n_excluded >= 25 and n_included % 25 == 0:
             sample_size = min(n_included, n_excluded)
             tasks.suggest_keyterms.apply_async(args=[review_id, sample_size])
-        # if at least 100 citations have been included AND excluded
-        # and only once every 50 included citations
-        # (re-)train a citation ranking model
-        if n_included >= 100 and n_excluded >= 100 and n_included % 50 == 0:
-            tasks.train_citation_ranking_model.apply_async(args=[review_id])
+        # once every 100 fully screened citations, (re-)train a study ranker model
+        n_incl_excl = n_included + n_excluded
+        if n_incl_excl > 0 and n_incl_excl % 100 == 0:
+            tasks.train_study_ranker_model.apply_async(args=[review_id])
     elif stage == "fulltext":
         # we may have to insert or delete a corresponding data extraction record
         data_extraction = connection.execute(
@@ -911,21 +910,23 @@ def update_study_status(mapper, connection, target):
                 sa.insert(DataExtraction).values(study_id=study_id, review_id=review_id)
             )
             LOGGER.info("inserted <DataExtraction(study_id=%s)>", study_id)
-            # data_extraction_inserted_or_deleted = True
+            data_extraction_inserted_or_deleted = True
         elif status != "included" and data_extraction is not None:
             connection.execute(
                 sa.delete(DataExtraction).where(DataExtraction.study_id == study_id)
             )
             LOGGER.info("deleted <DataExtraction(study_id=%s)>", study_id)
-            # data_extraction_inserted_or_deleted = True
-        # TODO: should we do something now?
-        # if data_extraction_inserted_or_deleted is True:
-        #     with connection.begin():
-        #         status_counts = connection.execute(
-        #             sa.select(Review.num_fulltexts_included, Review.num_fulltexts_excluded)\
-        #             .where(Review.id == review_id)
-        #             ).fetchone()
-        #         LOGGER.info(
-        #             '<Review(id=%s)> fulltext_status counts = %s',
-        #             review_id, status_counts)
-        #         n_included, n_excluded = status_counts
+            data_extraction_inserted_or_deleted = True
+        if data_extraction_inserted_or_deleted is True:
+            review = (
+                db.session.execute(sa.select(Review).filter_by(id=review_id))
+                .scalars()
+                .one()
+            )
+            status_counts = review.num_fulltexts_by_status(["included", "excluded"])
+            n_incl_excl = status_counts.get("included", 0) + status_counts.get(
+                "excluded", 0
+            )
+            # once every 100 fully screened fulltexts, (re-)train a study ranker model
+            if n_incl_excl > 0 and n_incl_excl % 100 == 0:
+                tasks.train_study_ranker_model.apply_async(args=[review_id])
