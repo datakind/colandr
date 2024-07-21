@@ -259,7 +259,7 @@ class StudiesResource(Resource):
             "tag": ma_fields.String(load_default=None, validate=Length(max=25)),
             "tsquery": ma_fields.String(load_default=None, validate=Length(max=50)),
             "order_by": ma_fields.String(
-                load_default="recency", validate=OneOf(["recency", "relevance"])
+                load_default="relevance", validate=OneOf(["recency", "relevance"])
             ),
             "order_dir": ma_fields.String(
                 load_default="DESC", validate=OneOf(["ASC", "DESC"])
