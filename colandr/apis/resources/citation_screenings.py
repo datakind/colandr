@@ -192,6 +192,7 @@ class CitationScreeningsResource(Resource):
         study.screenings.add(screening)
         db.session.commit()
         current_app.logger.info("inserted %s", screening)
+        tasks.train_study_ranker_model.apply_async(args=[study.review_id, screening.id])
         return _convert_screening_v2_into_v1(ScreeningV2Schema().dump(screening))
 
     @ns.doc(
