@@ -368,49 +368,6 @@ def suggest_keyterms(review_id: int, sample_size: int):
 
 
 @shared_task
-def train_citation_ranking_model(review_id: int):
-    lock = _get_redis_lock(f"train_citations_ranking_model__review-{review_id}")
-    lock.acquire()
-
-    LOGGER.info("<Review(id=%s)>: training citation ranking model", review_id)
-
-    # make sure at least some citations have had their text content vectors found
-    stmt = sa.select(
-        sa.exists()
-        .where(models.Study.review_id == review_id)
-        .where(models.Study.citation_text_content_vector_rep != [])
-    )
-    citations_ready = db.session.execute(stmt).scalar_one()
-    if citations_ready is False:
-        LOGGER.warning(
-            "<Review(id=%s)>: no citations found with vectorized text content for, %s",
-            review_id,
-        )
-        lock.release()
-        return
-
-    # TODO: should this be a random sample? i think no, but old comment said yes
-    # get included citations
-    stmt = (
-        sa.select(
-            models.Study.citation_text_content_vector_rep, models.Study.citation_status
-        )
-        .where(models.Study.review_id == review_id)
-        .where(models.Study.dedupe_status == "not_duplicate")
-        # .where(models.Study.citation_status.in_(["included", "excluded"]))
-        .where(models.Study.citation_status == sa.any_(["included", "excluded"]))
-        .where(models.Study.citation_text_content_vector_rep != [])
-    )
-    results = db.session.execute(stmt)
-    feature_vecs, labels = zip(*results)
-    ranker = Ranker(review_id=review_id)
-    ranker.fit(feature_vecs, labels)
-    ranker.save(os.path.join(current_app.config["RANKING_MODELS_DIR"], str(review_id)))
-
-    lock.release()
-
-
-@shared_task
 def train_study_ranker_model(review_id: int, screening_id: t.Optional[int] = None):
     lock = _get_redis_lock(f"train_study_ranker_model__review-{review_id}")
     lock.acquire()
