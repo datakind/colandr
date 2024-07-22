@@ -450,8 +450,11 @@ class StudiesResource(Resource):
             if study_ranker.model_fpath.exists():
                 records = (
                     {
-                        "text": result.fulltext.get("text_content")
-                        or result.citation_text_content
+                        "text": (
+                            result.fulltext["text_content"][:5000]
+                            if result.fulltext.get("text_content")
+                            else result.citation_text_content
+                        )
                     }
                     for result in results
                 )
