@@ -136,7 +136,7 @@ class StudyRanker:
 
     def predict_many(
         self, records: Iterable[dict[str, t.Any]], *, proba: bool = False
-    ) -> pd.Series:
+    ) -> pd.Series | pd.DataFrame:
         X = pd.DataFrame(data=records)[self.feature_col].astype("string")
         if not proba:
             return self.model().predict_many(X)
