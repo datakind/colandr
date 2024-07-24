@@ -99,7 +99,15 @@ class StudyRanker:
                 )
         return self._model
 
+    def clone(self):
+        """Make a fresh clone of :attr:`StudyRanker._model` ."""
+        self._model = _MODEL.clone()
+
     def save(self) -> None:
+        """
+        Save instance of :attr:`StudyRanker._model`
+        to disk at :attr:`StudyRanker.model_fpath` .
+        """
         model_fpath = self.model_fpath
         model_fpath.parent.mkdir(parents=True, exist_ok=True)
         with model_fpath.open(mode="wb") as f:

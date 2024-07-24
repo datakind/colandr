@@ -15,7 +15,7 @@ from flask_mail import Message
 from . import models
 from .apis.schemas import ReviewPlanSuggestedKeyterms
 from .extensions import db, mail
-from .lib.models import Deduper, Ranker, StudyRanker
+from .lib.models import Deduper, StudyRanker
 from .lib.nlp import hack
 from .lib.nlp import utils as nlp_utils
 
@@ -441,6 +441,7 @@ def _train_study_ranker_model_from_scratch(study_ranker: StudyRanker, review_id:
     # union outputs from both cases
     stmt = stmt1.union_all(stmt2)
     records = (row._asdict() for row in db.session.execute(stmt))
+    study_ranker.clone()
     study_ranker.learn_many(records)
     study_ranker.save()
 
