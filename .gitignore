@@ -2,6 +2,9 @@
 .env
 colandr.pid
 
+# app data
+colandr_data/ranker_models/
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
