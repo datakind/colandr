@@ -10,7 +10,7 @@ from webargs import missing
 from webargs.fields import DelimitedList
 from webargs.flaskparser import use_args, use_kwargs
 
-from ... import models
+from ... import models, tasks
 from ...extensions import db
 from ...lib import constants
 from ...utils import assign_status
@@ -212,6 +212,7 @@ class FulltextScreeningsResource(Resource):
         study.screenings.add(screening)
         db.session.commit()
         current_app.logger.info("inserted %s", screening)
+        tasks.train_study_ranker_model.apply_async(args=[study.review_id, screening.id])
         return _convert_screening_v2_into_v1(ScreeningV2Schema().dump(screening))
 
     @ns.doc(

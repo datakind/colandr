@@ -1,6 +1,6 @@
 FROM python:3.11-slim AS base
 
-ENV COLANDR_APP_DIR /app
+ENV COLANDR_APP_DIR=/app
 RUN mkdir -p ${COLANDR_APP_DIR}
 WORKDIR ${COLANDR_APP_DIR}
 

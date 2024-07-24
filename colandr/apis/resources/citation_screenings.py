@@ -192,6 +192,7 @@ class CitationScreeningsResource(Resource):
         study.screenings.add(screening)
         db.session.commit()
         current_app.logger.info("inserted %s", screening)
+        tasks.train_study_ranker_model.apply_async(args=[study.review_id, screening.id])
         return _convert_screening_v2_into_v1(ScreeningV2Schema().dump(screening))
 
     @ns.doc(
@@ -460,11 +461,6 @@ class CitationsScreeningsResource(Resource):
         if n_included >= 25 and n_excluded >= 25:
             sample_size = min(n_included, n_excluded)
             tasks.suggest_keyterms.apply_async(args=[review_id, sample_size])
-        # do we have to train a ranking model?
-        if n_included >= 100 and n_excluded >= 100:
-            tasks.train_citation_ranking_model.apply_async(
-                args=[review_id], countdown=3
-            )
 
 
 def _convert_screening_v2_into_v1(record) -> dict:

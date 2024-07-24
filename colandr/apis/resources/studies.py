@@ -1,4 +1,3 @@
-import os
 import random
 from operator import itemgetter
 
@@ -15,7 +14,7 @@ from webargs.flaskparser import use_args, use_kwargs
 from ... import models
 from ...extensions import db
 from ...lib import constants
-from ...lib.models import Ranker
+from ...lib.models import StudyRanker
 from ...lib.nlp import reviewer_terms
 from ..errors import forbidden_error, not_found_error
 from ..schemas import StudySchema
@@ -260,7 +259,7 @@ class StudiesResource(Resource):
             "tag": ma_fields.String(load_default=None, validate=Length(max=25)),
             "tsquery": ma_fields.String(load_default=None, validate=Length(max=50)),
             "order_by": ma_fields.String(
-                load_default="recency", validate=OneOf(["recency", "relevance"])
+                load_default="relevance", validate=OneOf(["recency", "relevance"])
             ),
             "order_dir": ma_fields.String(
                 load_default="DESC", validate=OneOf(["ASC", "DESC"])
@@ -439,51 +438,61 @@ class StudiesResource(Resource):
                 stmt = stmt.where(Study.citation_text_content.match(tsquery))
 
             # get results and corresponding relevance scores
-            stmt = stmt.order_by(db.func.random()).limit(1000)
+            limit = 10 * per_page
+            stmt = stmt.order_by(db.func.random()).limit(limit)
             results = db.session.execute(stmt).scalars().all()
             scores = None
 
-            # best option: we have a trained citation ranking model
-            ranker = Ranker.load(
-                os.path.join(current_app.config["RANKING_MODELS_DIR"], str(review_id)),
-                review_id,
+            # best option: we have a trained study ranker model
+            study_ranker = StudyRanker(
+                review_id, current_app.config["RANKER_MODELS_DIR"]
             )
-            if os.path.exists(str(ranker.model_fpath)):
-                # ranker model available :)
-                scores = ranker.predict(
-                    result.citation_text_content_vector_rep for result in results
+            if study_ranker.model_fpath.exists():
+                records = (
+                    {
+                        "text": (
+                            result.fulltext["text_content"][:5000]
+                            if result.fulltext and result.fulltext.get("text_content")
+                            else result.citation_text_content
+                        )
+                    }
+                    for result in results
                 )
+                try:
+                    scores = study_ranker.predict_many(records, proba=True)[True]
+                except KeyError:  # no records, apparently
+                    pass
 
-            # next best option: both positive and negative keyterms
-            if not scores:
-                review_plan = review.review_plan
-                suggested_keyterms = review_plan.suggested_keyterms
-                if suggested_keyterms:
-                    incl_regex, excl_regex = reviewer_terms.get_incl_excl_terms_regex(
-                        review_plan.suggested_keyterms
-                    )
-                    scores = [
-                        reviewer_terms.get_incl_excl_terms_score(
-                            incl_regex, excl_regex, result.citation_text_content
-                        )
-                        for result in results
-                    ]
+            # # next best option: both positive and negative keyterms
+            # if not scores:
+            #     review_plan = review.review_plan
+            #     suggested_keyterms = review_plan.suggested_keyterms
+            #     if suggested_keyterms:
+            #         incl_regex, excl_regex = reviewer_terms.get_incl_excl_terms_regex(
+            #             review_plan.suggested_keyterms
+            #         )
+            #         scores = [
+            #             reviewer_terms.get_incl_excl_terms_score(
+            #                 incl_regex, excl_regex, result.citation_text_content
+            #             )
+            #             for result in results
+            #         ]
 
-            # last option: just reviewer terms
-            if not scores:
-                review_plan = review.review_plan
-                keyterms = review_plan.keyterms
-                if keyterms:
-                    keyterms_regex = reviewer_terms.get_keyterms_regex(keyterms)
-                    scores = [
-                        reviewer_terms.get_keyterms_score(
-                            keyterms_regex, result.citation_text_content
-                        )
-                        for result in results
-                    ]
+            # # last option: just reviewer terms
+            # if not scores:
+            #     review_plan = review.review_plan
+            #     keyterms = review_plan.keyterms
+            #     if keyterms:
+            #         keyterms_regex = reviewer_terms.get_keyterms_regex(keyterms)
+            #         scores = [
+            #             reviewer_terms.get_keyterms_score(
+            #                 keyterms_regex, result.citation_text_content
+            #             )
+            #             for result in results
+            #         ]
 
-            # well fuck, we're out of options! let's order results randomly...
-            if not scores:
+            # no model, let's just order results randomly...
+            if scores is None:
                 scores = list(range(len(results)))
                 random.shuffle(scores)
 

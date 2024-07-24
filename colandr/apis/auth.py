@@ -407,7 +407,7 @@ def get_user_from_token(token: str) -> t.Optional[User]:
             sa.select(User).filter_by(email=identity)
         ).scalar_one_or_none()
     else:
-        raise TypeError()
+        raise TypeError(f"user identity={identity} is invalid")
     return user
 
 

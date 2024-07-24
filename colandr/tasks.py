@@ -1,5 +1,6 @@
 import itertools
 import os
+import typing as t
 
 import redis
 import redis.client
@@ -14,7 +15,7 @@ from flask_mail import Message
 from . import models
 from .apis.schemas import ReviewPlanSuggestedKeyterms
 from .extensions import db, mail
-from .lib.models import Deduper, Ranker
+from .lib.models import Deduper, Ranker, StudyRanker
 from .lib.nlp import hack
 from .lib.nlp import utils as nlp_utils
 
@@ -367,43 +368,104 @@ def suggest_keyterms(review_id: int, sample_size: int):
 
 
 @shared_task
-def train_citation_ranking_model(review_id: int):
-    lock = _get_redis_lock(f"train_citations_ranking_model__review-{review_id}")
+def train_study_ranker_model(review_id: int, screening_id: t.Optional[int] = None):
+    lock = _get_redis_lock(f"train_study_ranker_model__review-{review_id}")
     lock.acquire()
 
-    LOGGER.info("<Review(id=%s)>: training citation ranking model", review_id)
-
-    # make sure at least some citations have had their text content vectors found
-    stmt = sa.select(
-        sa.exists()
-        .where(models.Study.review_id == review_id)
-        .where(models.Study.citation_text_content_vector_rep != [])
-    )
-    citations_ready = db.session.execute(stmt).scalar_one()
-    if citations_ready is False:
-        LOGGER.warning(
-            "<Review(id=%s)>: no citations found with vectorized text content for, %s",
-            review_id,
-        )
-        lock.release()
-        return
-
-    # TODO: should this be a random sample? i think no, but old comment said yes
-    # get included citations
-    stmt = (
-        sa.select(
-            models.Study.citation_text_content_vector_rep, models.Study.citation_status
-        )
-        .where(models.Study.review_id == review_id)
-        .where(models.Study.dedupe_status == "not_duplicate")
-        # .where(models.Study.citation_status.in_(["included", "excluded"]))
-        .where(models.Study.citation_status == sa.any_(["included", "excluded"]))
-        .where(models.Study.citation_text_content_vector_rep != [])
-    )
-    results = db.session.execute(stmt)
-    feature_vecs, labels = zip(*results)
-    ranker = Ranker(review_id=review_id)
-    ranker.fit(feature_vecs, labels)
-    ranker.save(os.path.join(current_app.config["RANKING_MODELS_DIR"], str(review_id)))
+    study_ranker = StudyRanker(review_id, current_app.config["RANKER_MODELS_DIR"])
+    if screening_id is None or not study_ranker.model_fpath.exists():
+        _train_study_ranker_model_from_scratch(study_ranker, review_id)
+    else:
+        _train_study_ranker_model_from_screening(study_ranker, screening_id)
 
     lock.release()
+
+
+def _train_study_ranker_model_from_scratch(study_ranker: StudyRanker, review_id: int):
+    LOGGER.info("<Review(id=%s)>: training study ranker model from scratch", review_id)
+    # get target+text for studies that have been fully screened at either stage
+    # preferring fulltext- over citation-stage screening since it's based on more info
+    stmt1 = sa.select(
+        (
+            sa.case(
+                (
+                    models.Study.fulltext_status.in_(["included", "excluded"]),
+                    models.Study.fulltext_status,
+                ),
+                else_=models.Study.citation_status,
+            )
+            == "included"
+        ).label("target"),
+        sa.case(
+            (
+                models.Study.fulltext_status.in_(["included", "excluded"]),
+                sa.func.substring(
+                    models.Study.fulltext["text_content"].astext, 0, 5000
+                ),
+            ),
+            else_=models.Study.citation_text_content,
+        ).label("text"),
+    ).where(
+        models.Study.review_id == review_id,
+        models.Study.dedupe_status == "not_duplicate",
+        models.Study.citation_status.in_(["included", "excluded"]),
+        models.Study.fulltext_status.in_(["included", "excluded", "not_screened"]),
+    )
+    # get target+text for studies that have been partially screened at either stage
+    # leveraging study text corresponding to the screening's stage
+    stmt2 = (
+        sa.select(
+            (models.Screening.status == "included").label("target"),
+            sa.case(
+                (
+                    models.Screening.stage == "fulltext",
+                    sa.func.substring(
+                        models.Study.fulltext["text_content"].astext, 0, 5000
+                    ),
+                ),
+                else_=models.Study.citation_text_content,
+            ).label("text"),
+        )
+        .select_from(models.Study)
+        .join(models.Screening, models.Study.id == models.Screening.study_id)
+        .where(
+            sa.case(
+                (
+                    models.Screening.stage == "fulltext",
+                    ~models.Study.fulltext_status.in_(["included", "excluded"]),
+                ),
+                else_=~models.Study.citation_status.in_(["included", "excluded"]),
+            )
+        )
+    )
+    # union outputs from both cases
+    stmt = stmt1.union_all(stmt2)
+    records = (row._asdict() for row in db.session.execute(stmt))
+    study_ranker.learn_many(records)
+    study_ranker.save()
+
+
+def _train_study_ranker_model_from_screening(
+    study_ranker: StudyRanker, screening_id: int
+):
+    LOGGER.info("training study ranker model from <Screening(id=%s)>", screening_id)
+    screening = db.session.get(models.Screening, screening_id)
+    if screening is None:
+        LOGGER.warning(
+            "<Screening(id=%s)> not found; study ranker model training not possible",
+            screening_id,
+        )
+        return
+
+    study = screening.study
+    target = screening.status == "included"
+    text: str = (
+        study.fulltext.get("text_content", "")
+        if screening.stage == "fulltext"
+        else study.citation_text_content
+    )
+    study_ranker.learn_one({"text": text, "target": target})
+    # TODO: decide if we want to save model after every single screening
+    # saving takes ~20x longer than learning, so it's not "cheap"
+    # maybe we could get away with saving only every ~10 screenings
+    study_ranker.save()

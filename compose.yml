@@ -104,6 +104,8 @@ services:
       - COLANDR_MAIL_PORT=1025
       - COLANDR_MAIL_USE_TLS=0
       - COLANDR_MAIL_USE_SSL=0
+    volumes:
+      - .:/app
     command: "celery --app=make_celery.celery_app worker --loglevel=info"
 
 networks:
