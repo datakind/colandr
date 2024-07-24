@@ -452,13 +452,16 @@ class StudiesResource(Resource):
                     {
                         "text": (
                             result.fulltext["text_content"][:5000]
-                            if result.fulltext.get("text_content")
+                            if result.fulltext and result.fulltext.get("text_content")
                             else result.citation_text_content
                         )
                     }
                     for result in results
                 )
-                scores = study_ranker.predict_many(records, proba=True)[True]
+                try:
+                    scores = study_ranker.predict_many(records, proba=True)[True]
+                except KeyError:  # no records, apparently
+                    pass
 
             # # next best option: both positive and negative keyterms
             # if not scores:
@@ -489,7 +492,7 @@ class StudiesResource(Resource):
             #         ]
 
             # no model, let's just order results randomly...
-            if not scores:
+            if scores is None:
                 scores = list(range(len(results)))
                 random.shuffle(scores)
 
